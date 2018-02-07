@@ -9,28 +9,6 @@ from torch.utils.data import DataLoader
 import utils
 import itertools
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
-parser.add_argument('--beta1', default=0.9, type=float, help='momentum term for adam')
-parser.add_argument('--batch_size', default=100, type=int, help='batch size')
-parser.add_argument('--log_dir', default='/misc/vlgscratch4/FergusGroup/denton/drnetpy_logs/', help='base directory to save logs')
-parser.add_argument('--name', default='', help='identifierfor directory')
-parser.add_argument('--data_root', default='', help='root directory for data')
-parser.add_argument('--optimizer', default='adam', help='optimizer to train with')
-parser.add_argument('--niter', type=int, default=200, help='number of epochs to train for')
-parser.add_argument('--seed', default=1, type=int, help='manual seed')
-parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
-parser.add_argument('--content_dim', type=int, default=128, help='size of the content vector')
-parser.add_argument('--pose_dim', type=int, default=10, help='size of the pose vector')
-parser.add_argument('--image_width', type=int, default=64, help='the height / width of the input image to network')
-parser.add_argument('--channels', default=3, type=int)
-parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
-parser.add_argument('--max_step', type=int, default=12, help='maximum distance between frames')
-parser.add_argument('--sd_weight', type=float, default=0.01, help='weight on adversarial loss')
-parser.add_argument('--model', default='dcgan', help='model type (dcgan | unet | resnet)')
-
-
-opt = parser.parse_args()
 name = 'model=%s-content_dim=%d-pose_dim=%d-max_step=%d-sd_weight=%.3f-lr=%.3f' % (opt.model, opt.content_dim, opt.pose_dim, opt.max_step, opt.sd_weight, opt.lr)
 opt.log_dir = '%s/%s/%s' % (opt.log_dir, opt.data, name)
 
@@ -51,6 +29,7 @@ if opt.model == 'dcgan':
     if opt.image_width == 64:
         import models.dcgan_64 as models
     elif opt.image_width == 128:
+        raise ValueError('dcgan_128 not implemented yet!')
         import models.dcgan_128 as models
 if opt.model == 'resnet':
     if opt.image_width == 64:
@@ -64,8 +43,7 @@ elif opt.model == 'unet':
         raise ValueError('unet_128 not implemented yet!')
 
 netC = models.scene_discriminator(opt.pose_dim)
-netEC = models.content_encoder(opt.content_dim, opt.channels)
-netEP = models.pose_encoder(opt.pose_dim, opt.channels)
+netEM = models.mvmt_encoder(opt.content_dim, opt.channels)
 netD = models.decoder(opt.content_dim, opt.pose_dim, opt.channels)
 
 # ---------------- optimizers ----------------
@@ -79,8 +57,7 @@ else:
   raise ValueError('Unknown optimizer: %s' % opt.optimizer)
 
 optimizerC = opt.optimizer(netC.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-optimizerEC = opt.optimizer(netEC.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-optimizerEP = opt.optimizer(netEP.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+optimizerEM = opt.optimizer(netEC.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 optimizerD = opt.optimizer(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
 # --------- loss functions ------------------------------------
@@ -88,8 +65,7 @@ mse_criterion = nn.MSELoss()
 bce_criterion = nn.MSELoss()
 
 # --------- transfer to gpu ------------------------------------
-netEP.cuda()
-netEC.cuda()
+netEM.cuda()
 netD.cuda()
 netC.cuda()
 mse_criterion.cuda()
@@ -135,7 +111,7 @@ def plot_rec(x, epoch):
       rec = netD([h_c, h_p])
 
       x_c, x_p, rec = x_c.data, x_p.data, rec.data
-      fname = '%s/rec/%d.png' % (opt.log_dir, epoch) 
+      fname = '%s/rec/%d.png' % (opt.log_dir, epoch)
       to_plot = []
       row_sz = 5
       nplot = 20
@@ -147,11 +123,11 @@ def plot_rec(x, epoch):
 
 def plot_analogy(x, epoch):
     x_c = x[0]
-    
+
 
     h_c = netEC(x_c)
     nrow = 10
-    row_sz = opt.max_step 
+    row_sz = opt.max_step
     to_plot = []
     row = [xi[0].data for xi in x]
     zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
@@ -167,7 +143,7 @@ def plot_analogy(x, epoch):
         for i in range(nrow):
             to_plot[i+1].append(rec[i].data.clone())
 
-    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch) 
+    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
     utils.save_tensors_image(fname, to_plot)
 
 def plot_ind(x, epoch):
@@ -175,7 +151,7 @@ def plot_ind(x, epoch):
 
     h_c = netEC(x_c)
     nrow = 10
-    row_sz = opt.max_step 
+    row_sz = opt.max_step
     to_plot = []
     row = [xi[0].data for xi in x]
     zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
@@ -191,7 +167,7 @@ def plot_ind(x, epoch):
         for i in range(nrow):
             to_plot[i+1].append(rec[i].data.clone())
 
-    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch) 
+    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
     utils.save_tensors_image(fname, to_plot)
 
 # --------- training funtions ------------------------------------
@@ -215,7 +191,7 @@ def train(x):
     sim_loss = mse_criterion(h_c1[0] if opt.model == 'unet' else h_c1, h_c2)
 
 
-    # reconstruction loss: ||D(h_c1, h_p1), x_p1|| 
+    # reconstruction loss: ||D(h_c1, h_p1), x_p1||
     rec = netD([h_c1, h_p1])
     rec_loss = mse_criterion(rec, x_p1)
 
@@ -232,7 +208,7 @@ def train(x):
     optimizerEP.step()
     optimizerD.step()
 
-    return sim_loss.data.cpu().numpy(),rec_loss.data.cpu().numpy() 
+    return sim_loss.data.cpu().numpy(),rec_loss.data.cpu().numpy()
 
 def train_scene_discriminator(x):
     netC.zero_grad()
