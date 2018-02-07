@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 
 class dcgan_conv(nn.Module):
-  def __init__(self, nin, nout):
+  def __init__(self, nin, nout, stride=1):
     super(dcgan_conv, self).__init__()
     self.main = nn.Sequential(
-      nn.Conv2d(nin, nout, 4, 2, 1),
+      nn.Conv2d(nin, nout, 5, stride, 2),
       nn.BatchNorm2d(nout),
       nn.LeakyReLU(0.2, inplace=True),
       )
@@ -26,187 +27,132 @@ class dcgan_upconv(nn.Module):
   def forward(self, input):
     return self.main(input)
 
-class pose_encoder(nn.Module):
-  def __init__(self, pose_dim, nc=1, nf=64):
-    super(pose_encoder, self).__init__()
-    self.main = nn.Sequential(
+class mouvement_encoder(nn.Module):
+  def __init__(self,  nc=1, nf=32, input_size=64,  nb_out_kernel= 10, out_kernel_size = 5):
+    super(mouvement_encoder, self).__init__()
+    self.nb_out_kernel = nb_out_kernel
+    self.out_kernel_size = out_kernel_size
+    self.nf = nf
+    self.input_size = input_size
+
+    self.extract = nn.Sequential(
       # input is (nc) x 64 x 64
-      dcgan_conv(nc, nf),
+      dcgan_conv(nc, nf, 2),
       # state size. (nf) x 32 x 32
+      dcgan_conv(nf, nf),
+      # state size. (nf) x 32 x 32
+      dcgan_conv(nf, nf),
+      # state size. (nf) x 32 x 32
+      dcgan_conv(nf, nf, 2),
+      # state size. (nf) x 16 x 16
       dcgan_conv(nf, nf * 2),
       # state size. (nf*2) x 16 x 16
-      dcgan_conv(nf * 2, nf * 4),
+      dcgan_conv(nf * 2, nf * 4, 2),
       # state size. (nf*4) x 8 x 8
-      dcgan_conv(nf * 4, nf * 8),
-      # state size. (nf*8) x 4 x 4
-      nn.Conv2d(nf * 8, pose_dim, 4, 1, 0),
-      nn.BatchNorm2d(pose_dim),
-      nn.Tanh()
-      )
-
+    )
+    self.linear = nn.Linear(int(nf *4*input_size*input_size/64), nb_out_kernel*out_kernel_size*out_kernel_size)
   def forward(self, input):
-    return self.main(input)
+    out = self.extract(input)
+    out = out.view(out.size()[0], -1)
+    out = self.linear(out)
+    out = out.view(-1, self.nb_out_kernel, self.out_kernel_size, self.out_kernel_size)
 
-class ind_pose_encoder(nn.Module):
-  def __init__(self, n_pose, pose_dim, sep_path=False, nc=1, nf=32):
-    super(ind_pose_encoder, self).__init__()
-    self.n_pose = n_pose
-    self.pose_dim = pose_dim
-    self.sep = sep_path
-    if self.sep:
-      nets = []
-      for i in range(n_pose):
-        nets.append(nn.Sequential(
-          # input is (nc) x 64 x 64
-          dcgan_conv(nc, nf),
-          # state size. (nf) x 32 x 32
-          dcgan_conv(nf, nf * 2),
-          # state size. (nf*2) x 16 x 16
-          dcgan_conv(nf * 2, nf * 4),
-          # state size. (nf*4) x 8 x 8
-          dcgan_conv(nf * 4, nf * 8),
-          # state size. (nf*8) x 4 x 4
-          nn.Conv2d(nf * 8, pose_dim, 4, 1, 0),
-          nn.BatchNorm2d(pose_dim),
-          nn.Tanh()
-          ))
-      self.nets = nn.ModuleList(nets)
-    else:
-      self.net = nn.Sequential(
-          # input is (nc) x 64 x 64
-          dcgan_conv(nc, nf),
-          # state size. (nf) x 32 x 32
-          dcgan_conv(nf, nf * 2),
-          # state size. (nf*2) x 16 x 16
-          dcgan_conv(nf * 2, nf * 4),
-          # state size. (nf*4) x 8 x 8
-          dcgan_conv(nf * 4, nf * 8),
-          # state size. (nf*8) x 4 x 4
-          nn.Conv2d(nf * 8, pose_dim*n_pose, 4, 1, 0),
-          nn.BatchNorm2d(pose_dim*n_pose),
-          nn.Tanh()
-          )
-      
-  def forward(self, input):
-    if self.sep:
-      output = []
-      for i in range(self.n_pose):
-        output.append(self.nets[i](input))
-    else:
-      combined = self.net(input)
-      output = []
-      for i in range(0, self.n_pose*self.pose_dim, self.pose_dim):
-        output.append(combined[:, i:i+self.pose_dim])
-    return output 
-
-class content_encoder(nn.Module):
-  def __init__(self, content_dim, nc=1, nf=64):
-    super(content_encoder, self).__init__()
-    self.main = nn.Sequential(
-      # input is (nc) x 64 x 64
-      dcgan_conv(nc, nf),
-      # state size. (nf) x 32 x 32
-      dcgan_conv(nf, nf * 2),
-      # state size. (nf*2) x 16 x 16
-      dcgan_conv(nf * 2, nf * 4),
-      # state size. (nf*4) x 8 x 8
-      dcgan_conv(nf * 4, nf * 8),
-      # state size. (nf*8) x 4 x 4
-      nn.Conv2d(nf * 8, content_dim, 4, 1, 0),
-      nn.BatchNorm2d(content_dim),
-      nn.Tanh()
-      )
-
-  def forward(self, input):
-    return self.main(input)
-
-class ind_content_encoder(nn.Module):
-  def __init__(self, n_content, content_dim, nc=1, nf=64):
-    super(ind_content_encoder, self).__init__()
-    self.n_content = n_content
-    nets = []
-    for i in range(n_content):
-      nets.append(nn.Sequential(
-        # input is (nc) x 64 x 64
-        dcgan_conv(nc, nf),
-        # state size. (nf) x 32 x 32
-        dcgan_conv(nf, nf * 2),
-        # state size. (nf*2) x 16 x 16
-        dcgan_conv(nf * 2, nf * 4),
-        # state size. (nf*4) x 8 x 8
-        dcgan_conv(nf * 4, nf * 8),
-        # state size. (nf*8) x 4 x 4
-        nn.Conv2d(nf * 8, content_dim, 4, 1, 0),
-        nn.BatchNorm2d(content_dim),
-        nn.Tanh()
-        ))
-    self.nets = nn.ModuleList(nets)
-
-  def forward(self, input):
-    output = []
-    for i in range(self.n_content):
-      output.append(self.nets[i](input))
-    return output
+    return out
 
 class decoder(nn.Module):
-  def __init__(self, content_dim, pose_dim, nc=1, nf=64):
-    super(decoder, self).__init__()
-    self.main = nn.Sequential(
-      # input is Z, going into a convolution
-      nn.ConvTranspose2d(content_dim+pose_dim, nf * 8, 4, 1, 0),
-      nn.BatchNorm2d(nf * 8),
-      nn.LeakyReLU(0.2, inplace=True),
-      # state size. (nf*8) x 4 x 4
-      dcgan_upconv(nf * 8, nf * 4),
-      # state size. (nf*4) x 8 x 8
-      dcgan_upconv(nf * 4, nf * 2),
-      # state size. (nf*2) x 16 x 16
-      dcgan_upconv(nf * 2, nf),
-      # state size. (nf) x 32 x 32
-      nn.ConvTranspose2d(nf, nc, 4, 2, 1),
-      nn.Sigmoid()
-      # state size. (nc) x 64 x 64
-    )
+    def __init__(self, mvmt_kernel_size=5, nc=1, nf=64, nb_mvmt_kernel=10, batch_size=32):
+        super(decoder, self).__init__()
+        self.mvmt_kernel_size= mvmt_kernel_size
+        self.batch_size = batch_size
+        self.nb_mvmt_kernel = nb_mvmt_kernel
+# input is (nc) x 64 x 64
+        self.conv1 = dcgan_conv(nc, nf, 2)
+# state size. (nf) x 32 x 32
+        self.conv2 = dcgan_conv(nf, nf)
+# state size. (nf) x 32 x 32
+        self.conv3 = dcgan_conv(nf, nf)
+# state size. (nf) x 32 x 32
+        self.conv4 = dcgan_conv(nf, nf, 2)
+# state size. (nf) x 16 x 16
+        self.conv5 = dcgan_conv(nf, nf * 2)
+# state size. (nf*2) x 16 x 16
+        self.conv6 = dcgan_conv(nf * 2, nf * 4, 2)
+# state size. (nf*4) x 8 x 8
 
-  def forward(self, input):
-    content, pose = input
-    if type(content) == list:
-      content = torch.cat(content, 1)
-    if type(pose) == list:
-      pose = torch.cat(pose, 1)
-    output = self.main(torch.cat([content, pose], 1))
-    return output
+        self.linear = nn.Linear(8*8*nf*4 + nb_mvmt_kernel* mvmt_kernel_size*mvmt_kernel_size, 8*8*nf*4)
+# state size. (nf*4) x 8 x 8
+        self.upconv1 = dcgan_upconv(nf*4, nf*4)
+# state size. (nf*4) x 16 x 16
+        self.upconv2 = dcgan_upconv(nf*4, nf*2)
+# state size. (nf*2) x 32 x 32
+        self.upconv3 = dcgan_upconv(nf*2, nb_mvmt_kernel+ 1)
+# state size. mvmt_dim + 1 x 64 x 64
+
+
+    def forward(self, input):
+        input_frame, mvmt_kernel = input
+#    if type(content) == list:
+#      content = torch.cat(content, 1)
+#    if type(pose) == list:
+#      pose = torch.cat(pose, 1)
+        print(type(input_frame))
+        print(input_frame.size())
+        content = self.conv1(input_frame)
+        content = self.conv2(content)
+        content = self.conv3(content)
+        content = self.conv4(content)
+        content = self.conv5(content)
+        content = self.conv6(content)
+        print(content.view(self.batch_size,-1).size())
+        print(mvmt_kernel.view(self.batch_size,-1).size())
+
+        concat = torch.cat([content.view(self.batch_size,-1), mvmt_kernel.view(self.batch_size, -1)], 1)
+        print(concat.size())
+        concat = self.linear(concat)
+        concat = concat.view(self.batch_size, -1, 8, 8)
+
+        masks = self.upconv1(concat)
+        masks = self.upconv2(masks)
+        masks = self.upconv3(masks)
+
+        mvmt_kernel = mvmt_kernel.view(-1, self.nb_mvmt_kernel, 1, self.mvmt_kernel_size, self.mvmt_kernel_size)
+        input_frame_view = input_frame.view(-1, 3, 1, 64, 64)
+
+        conved_images = Variable(torch.Tensor(self.batch_size, 3, self.nb_mvmt_kernel, 64, 64))
+        # How to do better (depthwise_conv2d in torch)??
+        for i in range(self.batch_size):
+           conved_images[i] = torch.nn.functional.conv2d(input_frame_view[i], mvmt_kernel[i], padding=2)
+        transformed_images = torch.cat([input_frame_view, conved_images], 2)
+        # Expected Size : (-1, nb_mvmt_kernel + 1, 3, 64, 64)
+        output = self.masking_function(transformed_images, masks)
+
+        return output
+
+    def masking_function(self, transformed_images, masks):
+        ## LOWER_BOUDING?
+        ## normalizing masks accross channels
+        norm = torch.sum(masks, 0)
+        masks = torch.div(masks, norm)
+
+        masks = masks.view(-1,  1, self.nb_mvmt_kernel + 1,  64, 64)
+        masks = masks.expand(-1, 3, self.nb_mvmt_kernel + 1, 64, 64)
+        images = torch.mul(transformed_images, masks)
+        return torch.mean(images, 2)
 
 class scene_discriminator(nn.Module):
-  def __init__(self, pose_dim, nf=256):
-    super(scene_discriminator, self).__init__()
-    self.pose_dim = pose_dim
-    self.main = nn.Sequential(
-      nn.Linear(pose_dim*2, nf),
-      nn.ReLU(True),
-      nn.Linear(nf, nf),
-      nn.ReLU(True),
-      nn.Linear(nf, 1),
-      nn.Sigmoid(),
-    )
+    def __init__(self, mvmt_kernel_size=5, nb_mvmt_kernel=10, nf=256):
+        super(scene_discriminator, self).__init__()
+        self.kernel_dim = nb_mvmt_kernel*mvmt_kernel_size*mvmt_kernel_size
+        self.main = nn.Sequential(
+          nn.Linear(self.kernel_dim*2, nf),
+          nn.ReLU(True),
+          nn.Linear(nf, nf),
+          nn.ReLU(True),
+          nn.Linear(nf, 1),
+          nn.Sigmoid(),
+        )
 
-  def forward(self, input):
-    output = self.main(torch.cat(input, 1).view(-1, self.pose_dim*2))
-    return output
+    def forward(self, input):
+        output = self.main(torch.cat(input, 1).view(-1, self.kernel_dim*2))
+        return output
 
-class independent_discriminator(nn.Module):
-  def __init__(self, pose_dim, nf=256):
-    super(independent_discriminator, self).__init__()
-    self.pose_dim = pose_dim
-    self.main = nn.Sequential(
-      nn.Linear(pose_dim, nf),
-      nn.ReLU(True),
-      nn.Linear(nf, nf),
-      nn.ReLU(True),
-      nn.Linear(nf, 1),
-      nn.Sigmoid(),
-    )
-
-  def forward(self, input):
-    return self.main(torch.cat(input, 1).view(-1, self.pose_dim))
-    

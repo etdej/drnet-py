@@ -1,4 +1,5 @@
 import torch
+
 import torch.nn as nn
 from torch.autograd import Variable
 
@@ -15,7 +16,7 @@ class lstm(nn.Module):
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return  (Variable(torch.zeros(self.batch_size, self.hidden_size).cuda()), 
+        return  (Variable(torch.zeros(self.batch_size, self.hidden_size).cuda()),
                  Variable(torch.zeros(self.batch_size, self.hidden_size).cuda()))
 
     def forward(self, input):
