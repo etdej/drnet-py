@@ -9,6 +9,29 @@ from torch.utils.data import DataLoader
 import utils
 import itertools
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
+parser.add_argument('--beta1', default=0.9, type=float, help='momentum term for adam')
+parser.add_argument('--batch_size', default=100, type=int, help='batch size')
+parser.add_argument('--log_dir', default='/misc/vlgscratch4/FergusGroup/denton/drnetpy_logs/', help='base directory to save logs')
+parser.add_argument('--name', default='', help='identifierfor directory')
+parser.add_argument('--data_root', default='', help='root directory for data')
+parser.add_argument('--optimizer', default='adam', help='optimizer to train with')
+parser.add_argument('--niter', type=int, default=200, help='number of epochs to train for')
+parser.add_argument('--seed', default=1, type=int, help='manual seed')
+parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
+parser.add_argument('--content_dim', type=int, default=128, help='size of the content vector')
+parser.add_argument('--pose_dim', type=int, default=10, help='size of the pose vector')
+parser.add_argument('--image_width', type=int, default=64, help='the height / width of the input image to network')
+parser.add_argument('--channels', default=3, type=int)
+parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
+parser.add_argument('--max_step', type=int, default=12, help='maximum distance between frames')
+parser.add_argument('--sd_weight', type=float, default=0.01, help='weight on adversarial loss')
+parser.add_argument('--model', default='dcgan', help='model type (dcgan | unet | resnet)')
+
+
+opt = parser.parse_args()
+
 name = 'model=%s-content_dim=%d-pose_dim=%d-max_step=%d-sd_weight=%.3f-lr=%.3f' % (opt.model, opt.content_dim, opt.pose_dim, opt.max_step, opt.sd_weight, opt.lr)
 opt.log_dir = '%s/%s/%s' % (opt.log_dir, opt.data, name)
 
