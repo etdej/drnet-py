@@ -20,8 +20,8 @@ parser.add_argument('--optimizer', default='adam', help='optimizer to train with
 parser.add_argument('--niter', type=int, default=200, help='number of epochs to train for')
 parser.add_argument('--seed', default=1, type=int, help='manual seed')
 parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
-parser.add_argument('--content_dim', type=int, default=128, help='size of the content vector')
-parser.add_argument('--pose_dim', type=int, default=10, help='size of the pose vector')
+parser.add_argument('--content_dim', type=int, default=64, help='size of the content vector')
+parser.add_argument('--mvmt_dim', type=int, default=10, help='size of the pose vector')
 parser.add_argument('--image_width', type=int, default=64, help='the height / width of the input image to network')
 parser.add_argument('--channels', default=3, type=int)
 parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
@@ -32,7 +32,7 @@ parser.add_argument('--model', default='dcgan', help='model type (dcgan | unet |
 
 opt = parser.parse_args()
 
-name = 'model=%s-content_dim=%d-pose_dim=%d-max_step=%d-sd_weight=%.3f-lr=%.3f' % (opt.model, opt.content_dim, opt.pose_dim, opt.max_step, opt.sd_weight, opt.lr)
+name = 'model=%s-content_dim=%d-mvmt=%d-max_step=%d-sd_weight=%.3f-lr=%.3f' % (opt.model, opt.content_dim, opt.mvmt_dim, opt.max_step, opt.sd_weight, opt.lr)
 opt.log_dir = '%s/%s/%s' % (opt.log_dir, opt.data, name)
 
 os.makedirs('%s/rec/' % opt.log_dir, exist_ok=True)
@@ -43,8 +43,10 @@ print(opt)
 print("Random Seed: ", opt.seed)
 random.seed(opt.seed)
 torch.manual_seed(opt.seed)
-torch.cuda.manual_seed_all(opt.seed)
-dtype = torch.cuda.FloatTensor
+#torch.cuda.manual_seed_all(opt.seed)
+
+#dtype = torch.cuda.FloatTensor
+dtype = torch.FloatTensor
 
 
 # ---------------- create the models  ----------------
@@ -58,16 +60,18 @@ if opt.model == 'resnet':
     if opt.image_width == 64:
         raise ValueError('resnet_64 not implemented yet!')
     elif opt.image_width == 128:
+        raise ValueError('resnet_128 not implemented yet!')
         import models.resnet_128 as models
 elif opt.model == 'unet':
     if opt.image_width == 64:
+        raise ValueError('unet_64not implemented yet!')
         import models.unet_64 as models
     elif opt.image_width == 128:
         raise ValueError('unet_128 not implemented yet!')
 
-netC = models.scene_discriminator(opt.pose_dim)
-netEM = models.mvmt_encoder(opt.content_dim, opt.channels)
-netD = models.decoder(opt.content_dim, opt.pose_dim, opt.channels)
+netC = models.scene_discriminator(opt.mvmt_dim)
+netEM = models.mvmt_encoder(opt.mvmt_dim, opt.channels)
+netD = models.decoder(opt.mvmt_dim, opt.channels, batch_size=opt.batch_size)
 
 # ---------------- optimizers ----------------
 if opt.optimizer == 'adam':
@@ -80,7 +84,7 @@ else:
   raise ValueError('Unknown optimizer: %s' % opt.optimizer)
 
 optimizerC = opt.optimizer(netC.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
-optimizerEM = opt.optimizer(netEC.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
+optimizerEM = opt.optimizer(netEM.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 optimizerD = opt.optimizer(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
 # --------- loss functions ------------------------------------
@@ -88,11 +92,11 @@ mse_criterion = nn.MSELoss()
 bce_criterion = nn.MSELoss()
 
 # --------- transfer to gpu ------------------------------------
-netEM.cuda()
-netD.cuda()
-netC.cuda()
-mse_criterion.cuda()
-bce_criterion.cuda()
+#netEM.cuda()
+#netD.cuda()
+#netC.cuda()
+#mse_criterion.cuda()
+#bce_criterion.cuda()
 
 # --------- load a dataset ------------------------------------
 train_data, test_data, load_workers = utils.load_dataset(opt)
@@ -102,7 +106,7 @@ train_loader = DataLoader(train_data,
                           batch_size=opt.batch_size,
                           shuffle=True,
                           drop_last=True,
-                          pin_memory=True)
+                          pin_memory=False)
 test_loader = DataLoader(test_data,
                          num_workers=load_workers,
                          batch_size=opt.batch_size,
@@ -195,61 +199,57 @@ def plot_ind(x, epoch):
 
 # --------- training funtions ------------------------------------
 def train(x):
-    netEP.zero_grad()
-    netEC.zero_grad()
+    netEM.zero_grad()
     netD.zero_grad()
 
-    x_c1 = x[0]
-    x_c2 = x[random.randint(1, opt.max_step-1)]
-    x_p1 = x[random.randint(1, opt.max_step-1)]
-    x_p2 = x[random.randint(1, opt.max_step-1)]
+    x_1 = x[0]
+    x_m1 = x[random.randint(1, opt.max_step-1)]
+    x_m2 = x[random.randint(1, opt.max_step-1)]
 
-    h_c1 = netEC(x_c1)
-    h_c2 = Variable(netEC(x_c2)[0].data if opt.model == 'unet' else netEC(x_c2).data, requires_grad=False) # used as target for sim loss
-    h_p1 = netEP(x_p1) # used for scene discriminator
-    h_p2 = netEP(x_p2).detach()
-
-
-    # similarity loss: ||h_c1 - h_c2||
-    sim_loss = mse_criterion(h_c1[0] if opt.model == 'unet' else h_c1, h_c2)
-
+    h_m1 = netEM([x_1, x_m1])
+    h_m2 = netEM([x_1, x_m2])
 
     # reconstruction loss: ||D(h_c1, h_p1), x_p1||
-    rec = netD([h_c1, h_p1])
-    rec_loss = mse_criterion(rec, x_p1)
+    rec = netD([x_1, h_m1])
+    rec_loss = mse_criterion(rec, x_m1)
 
     # scene discriminator loss: maximize entropy of output
-    target = torch.cuda.FloatTensor(opt.batch_size, 1).fill_(0.5)
-    out = netC([h_p1, h_p2])
-    sd_loss = bce_criterion(out, Variable(target))
+    #target = torch.cuda.FloatTensor(opt.batch_size, 1).fill_(0.5)
+#    target = torch.FloatTensor(opt.batch_size, 1).fill_(0.5)
+#    out = netC([h_m1, h_m2])
+#    sd_loss = bce_criterion(out, Variable(target))
 
     # full loss
-    loss = sim_loss + rec_loss + opt.sd_weight*sd_loss
+    loss = rec_loss
+#    loss = rec_loss + opt.sd_weight*sd_loss
     loss.backward()
 
-    optimizerEC.step()
-    optimizerEP.step()
+    optimizerEM.step()
     optimizerD.step()
 
-    return sim_loss.data.cpu().numpy(),rec_loss.data.cpu().numpy()
+    return rec_loss.data.cpu().numpy()
 
 def train_scene_discriminator(x):
     netC.zero_grad()
 
-    target = torch.cuda.FloatTensor(opt.batch_size, 1)
+    #target = torch.cuda.FloatTensor(opt.batch_size, 1)
+    target = torch.FloatTensor(opt.batch_size, 1)
 
     x1 = x[0]
-    x2 = x[random.randint(1, opt.max_step-1)]
-    h_p1 = netEP(x1).detach()
-    h_p2 = netEP(x2).detach()
+    x_m1 = x[random.randint(1, opt.max_step-1)]
+    x_m2 = x[random.randint(1, opt.max_step-1)]
+
+    h_m1 = netEM([x1, x_m1]).detach()
+    h_m2 = netEM([x1, x_m2]).detach()
 
     half = int(opt.batch_size/2)
-    rp = torch.randperm(half).cuda()
-    h_p2[:half] = h_p2[rp]
+    #rp = torch.randperm(half).cuda()
+    rp = torch.randperm(half)
+    h_m2[:half] = h_m2[rp]
     target[:half] = 1
     target[half:] = 0
 
-    out = netC([h_p1, h_p2])
+    out = netC([h_m1, h_m2])
     bce = bce_criterion(out, Variable(target))
 
     bce.backward()
@@ -260,22 +260,20 @@ def train_scene_discriminator(x):
 
 # --------- training loop ------------------------------------
 for epoch in range(opt.niter):
-    netEP.train()
-    netEC.train()
+    netEM.train()
     netD.train()
     netC.train()
-    epoch_sim_loss, epoch_rec_loss, epoch_sd_loss, epoch_sd_acc = 0, 0, 0, 0
+    epoch_rec_loss, epoch_sd_loss, epoch_sd_acc =  0, 0, 0
     for i in range(opt.epoch_size):
         x = next(training_batch_generator)
 
         # train scene discriminator
-        sd_loss, sd_acc = train_scene_discriminator(x)
-        epoch_sd_loss += sd_loss
-        epoch_sd_acc += sd_acc
+#        sd_loss, sd_acc = train_scene_discriminator(x)
+#        epoch_sd_loss += sd_loss
+#        epoch_sd_acc += sd_acc
 
         # train main model
-        sim_loss, rec_loss = train(x)
-        epoch_sim_loss += sim_loss
+        rec_loss = train(x)
         epoch_rec_loss += rec_loss
 
 
@@ -293,7 +291,6 @@ for epoch in range(opt.niter):
     # save the model
     torch.save({
         'netD': netD,
-        'netEP': netEP,
-        'netEC': netEC,
+        'netEM': netEM,
         'opt': opt},
         '%s/model.pth.tar' % opt.log_dir)

@@ -27,9 +27,9 @@ class dcgan_upconv(nn.Module):
   def forward(self, input):
     return self.main(input)
 
-class mouvement_encoder(nn.Module):
-  def __init__(self,  nc=1, nf=32, input_size=64,  nb_out_kernel= 10, out_kernel_size = 5):
-    super(mouvement_encoder, self).__init__()
+class mvmt_encoder(nn.Module):
+  def __init__(self, nb_out_kernel = 10, nc=1, nf=32, input_size=64, out_kernel_size = 5):
+    super(mvmt_encoder, self).__init__()
     self.nb_out_kernel = nb_out_kernel
     self.out_kernel_size = out_kernel_size
     self.nf = nf
@@ -37,7 +37,7 @@ class mouvement_encoder(nn.Module):
 
     self.extract = nn.Sequential(
       # input is (nc) x 64 x 64
-      dcgan_conv(nc, nf, 2),
+      dcgan_conv(2*nc, nf, 2),
       # state size. (nf) x 32 x 32
       dcgan_conv(nf, nf),
       # state size. (nf) x 32 x 32
@@ -52,7 +52,8 @@ class mouvement_encoder(nn.Module):
     )
     self.linear = nn.Linear(int(nf *4*input_size*input_size/64), nb_out_kernel*out_kernel_size*out_kernel_size)
   def forward(self, input):
-    out = self.extract(input)
+    concat = torch.cat(input, 1)
+    out = self.extract(concat)
     out = out.view(out.size()[0], -1)
     out = self.linear(out)
     out = out.view(-1, self.nb_out_kernel, self.out_kernel_size, self.out_kernel_size)
@@ -60,7 +61,7 @@ class mouvement_encoder(nn.Module):
     return out
 
 class decoder(nn.Module):
-    def __init__(self, mvmt_kernel_size=5, nc=1, nf=64, nb_mvmt_kernel=10, batch_size=32):
+    def __init__(self, nb_mvmt_kernel=10,nc=1, nf=64, mvmt_kernel_size=5, batch_size=32):
         super(decoder, self).__init__()
         self.mvmt_kernel_size= mvmt_kernel_size
         self.batch_size = batch_size
@@ -96,7 +97,6 @@ class decoder(nn.Module):
 #    if type(pose) == list:
 #      pose = torch.cat(pose, 1)
         print(type(input_frame))
-        print(input_frame.size())
         content = self.conv1(input_frame)
         content = self.conv2(content)
         content = self.conv3(content)
@@ -116,6 +116,8 @@ class decoder(nn.Module):
         masks = self.upconv3(masks)
 
         mvmt_kernel = mvmt_kernel.view(-1, self.nb_mvmt_kernel, 1, self.mvmt_kernel_size, self.mvmt_kernel_size)
+
+        input_frame_view = input_frame.contiguous()
         input_frame_view = input_frame.view(-1, 3, 1, 64, 64)
 
         conved_images = Variable(torch.Tensor(self.batch_size, 3, self.nb_mvmt_kernel, 64, 64))
@@ -140,7 +142,7 @@ class decoder(nn.Module):
         return torch.mean(images, 2)
 
 class scene_discriminator(nn.Module):
-    def __init__(self, mvmt_kernel_size=5, nb_mvmt_kernel=10, nf=256):
+    def __init__(self, nb_mvmt_kernel=10, mvmt_kernel_size=5, nf=256):
         super(scene_discriminator, self).__init__()
         self.kernel_dim = nb_mvmt_kernel*mvmt_kernel_size*mvmt_kernel_size
         self.main = nn.Sequential(
