@@ -8,7 +8,7 @@ if hostname == 'ned':
 else:
     path = '/misc/vlgscratch4/FergusGroup/denton/data/mnist/'
 
-path = '/Users/etienne/Desktop'
+path = "/home/ecd353/research_project/data/"
 class MovingMNIST(object):
 
     """Data Handler that creates Bouncing MNIST dataset on the fly."""

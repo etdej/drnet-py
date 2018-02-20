@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+dtype = torch.cuda.FloatTensor
+
 class dcgan_conv(nn.Module):
   def __init__(self, nin, nout, stride=1):
     super(dcgan_conv, self).__init__()
     self.main = nn.Sequential(
       nn.Conv2d(nin, nout, 5, stride, 2),
-      nn.BatchNorm2d(nout),
+      #nn.BatchNorm2d(nout),
       nn.LeakyReLU(0.2, inplace=True),
       )
 
@@ -20,7 +22,7 @@ class dcgan_upconv(nn.Module):
     super(dcgan_upconv, self).__init__()
     self.main = nn.Sequential(
       nn.ConvTranspose2d(nin, nout, 4, 2, 1),
-      nn.BatchNorm2d(nout),
+      #nn.BatchNorm2d(nout),
       nn.LeakyReLU(0.2, inplace=True),
       )
 
@@ -28,10 +30,10 @@ class dcgan_upconv(nn.Module):
     return self.main(input)
 
 class mvmt_encoder(nn.Module):
-  def __init__(self, nb_out_kernel = 10, nc=1, nf=32, input_size=64, out_kernel_size = 5):
+  def __init__(self, nb_out_kernel = 10, nc=1, nf=32, input_size=64, mvmt_kernel_size = 5):
     super(mvmt_encoder, self).__init__()
     self.nb_out_kernel = nb_out_kernel
-    self.out_kernel_size = out_kernel_size
+    self.out_kernel_size = mvmt_kernel_size
     self.nf = nf
     self.input_size = input_size
 
@@ -50,7 +52,7 @@ class mvmt_encoder(nn.Module):
       dcgan_conv(nf * 2, nf * 4, 2),
       # state size. (nf*4) x 8 x 8
     )
-    self.linear = nn.Linear(int(nf *4*input_size*input_size/64), nb_out_kernel*out_kernel_size*out_kernel_size)
+    self.linear = nn.Linear(int(nf *4*input_size*input_size/64), nb_out_kernel*mvmt_kernel_size*mvmt_kernel_size)
   def forward(self, input):
     concat = torch.cat(input, 1)
     out = self.extract(concat)
@@ -96,18 +98,14 @@ class decoder(nn.Module):
 #      content = torch.cat(content, 1)
 #    if type(pose) == list:
 #      pose = torch.cat(pose, 1)
-        print(type(input_frame))
         content = self.conv1(input_frame)
         content = self.conv2(content)
         content = self.conv3(content)
         content = self.conv4(content)
         content = self.conv5(content)
         content = self.conv6(content)
-        print(content.view(self.batch_size,-1).size())
-        print(mvmt_kernel.view(self.batch_size,-1).size())
 
         concat = torch.cat([content.view(self.batch_size,-1), mvmt_kernel.view(self.batch_size, -1)], 1)
-        print(concat.size())
         concat = self.linear(concat)
         concat = concat.view(self.batch_size, -1, 8, 8)
 
@@ -118,12 +116,12 @@ class decoder(nn.Module):
         mvmt_kernel = mvmt_kernel.view(-1, self.nb_mvmt_kernel, 1, self.mvmt_kernel_size, self.mvmt_kernel_size)
 
         input_frame_view = input_frame.contiguous()
-        input_frame_view = input_frame.view(-1, 3, 1, 64, 64)
+        input_frame_view = input_frame.view(self.batch_size, 3, 1, 64, 64)
 
-        conved_images = Variable(torch.Tensor(self.batch_size, 3, self.nb_mvmt_kernel, 64, 64))
+        conved_images = Variable(torch.cuda.FloatTensor(self.batch_size, 3, self.nb_mvmt_kernel, 64, 64))
         # How to do better (depthwise_conv2d in torch)??
         for i in range(self.batch_size):
-           conved_images[i] = torch.nn.functional.conv2d(input_frame_view[i], mvmt_kernel[i], padding=2)
+           conved_images[i] = torch.nn.functional.conv2d(input_frame_view[i], mvmt_kernel[i], padding=int((self.mvmt_kernel_size - 1)/2))
         transformed_images = torch.cat([input_frame_view, conved_images], 2)
         # Expected Size : (-1, nb_mvmt_kernel + 1, 3, 64, 64)
         output = self.masking_function(transformed_images, masks)
@@ -136,8 +134,8 @@ class decoder(nn.Module):
         norm = torch.sum(masks, 0)
         masks = torch.div(masks, norm)
 
-        masks = masks.view(-1,  1, self.nb_mvmt_kernel + 1,  64, 64)
-        masks = masks.expand(-1, 3, self.nb_mvmt_kernel + 1, 64, 64)
+        masks = masks.view(self.batch_size,  1, self.nb_mvmt_kernel + 1,  64, 64)
+        masks = masks.expand(self.batch_size, 3, self.nb_mvmt_kernel + 1, 64, 64)
         images = torch.mul(transformed_images, masks)
         return torch.mean(images, 2)
 

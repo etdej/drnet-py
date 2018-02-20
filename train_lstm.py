@@ -30,7 +30,7 @@ parser.add_argument('--rnn_layers', type=int, default=128, help='number of layer
 
 
 opt = parser.parse_args()
-name = 'rnn_size=%d-rnn_layers=%d-n_past=%d-n_future=%d-lr=%.3f' % (opt.rnn_size, opt.rnn_layers, opt.n_past, opt.n_future, opt.lr)
+name = 'rnn_size=%d-rnn_layers=%d-n_past=%d-n_future=%d-lr=%.4f' % (opt.rnn_size, opt.rnn_layers, opt.n_past, opt.n_future, opt.lr)
 opt.log_dir = '%s/lstm/%s' % (opt.model_path, name)
 
 os.makedirs('%s/gen/' % opt.log_dir, exist_ok=True)

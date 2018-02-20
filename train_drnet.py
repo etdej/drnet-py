@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import utils
 import itertools
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
@@ -22,6 +23,7 @@ parser.add_argument('--seed', default=1, type=int, help='manual seed')
 parser.add_argument('--epoch_size', type=int, default=600, help='epoch size')
 parser.add_argument('--content_dim', type=int, default=64, help='size of the content vector')
 parser.add_argument('--mvmt_dim', type=int, default=10, help='size of the pose vector')
+parser.add_argument('--mvmt_kernel_size', type=int, default=5, help='size of the pose vector')
 parser.add_argument('--image_width', type=int, default=64, help='the height / width of the input image to network')
 parser.add_argument('--channels', default=3, type=int)
 parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
@@ -32,21 +34,24 @@ parser.add_argument('--model', default='dcgan', help='model type (dcgan | unet |
 
 opt = parser.parse_args()
 
-name = 'model=%s-content_dim=%d-mvmt=%d-max_step=%d-sd_weight=%.3f-lr=%.3f' % (opt.model, opt.content_dim, opt.mvmt_dim, opt.max_step, opt.sd_weight, opt.lr)
+name = 'model=%s-kernel_mvmt_size=%d-mvmt=%d-max_step=%d-sd_weight=%.3f-lr=%.4f' % (opt.model, opt.mvmt_kernel_size, opt.mvmt_dim, opt.max_step, opt.sd_weight, opt.lr)
 opt.log_dir = '%s/%s/%s' % (opt.log_dir, opt.data, name)
 
 os.makedirs('%s/rec/' % opt.log_dir, exist_ok=True)
 os.makedirs('%s/analogy/' % opt.log_dir, exist_ok=True)
 
+sys.stdout = open('%s/output.txt' % (opt.log_dir), 'w')
+
 print(opt)
 
 print("Random Seed: ", opt.seed)
 random.seed(opt.seed)
-torch.manual_seed(opt.seed)
-#torch.cuda.manual_seed_all(opt.seed)
+#torch.manual_seed(opt.seed)
+torch.cuda.manual_seed_all(opt.seed)
 
-#dtype = torch.cuda.FloatTensor
-dtype = torch.FloatTensor
+
+dtype = torch.cuda.FloatTensor
+#dtype = torch.FloatTensor
 
 
 # ---------------- create the models  ----------------
@@ -70,8 +75,8 @@ elif opt.model == 'unet':
         raise ValueError('unet_128 not implemented yet!')
 
 netC = models.scene_discriminator(opt.mvmt_dim)
-netEM = models.mvmt_encoder(opt.mvmt_dim, opt.channels)
-netD = models.decoder(opt.mvmt_dim, opt.channels, batch_size=opt.batch_size)
+netEM = models.mvmt_encoder(opt.mvmt_dim, opt.channels, mvmt_kernel_size=opt.mvmt_kernel_size)
+netD = models.decoder(opt.mvmt_dim, opt.channels, batch_size=opt.batch_size, mvmt_kernel_size=opt.mvmt_kernel_size)
 
 # ---------------- optimizers ----------------
 if opt.optimizer == 'adam':
@@ -92,11 +97,11 @@ mse_criterion = nn.MSELoss()
 bce_criterion = nn.MSELoss()
 
 # --------- transfer to gpu ------------------------------------
-#netEM.cuda()
-#netD.cuda()
-#netC.cuda()
-#mse_criterion.cuda()
-#bce_criterion.cuda()
+netEM.cuda()
+netD.cuda()
+netC.cuda()
+mse_criterion.cuda()
+bce_criterion.cuda()
 
 # --------- load a dataset ------------------------------------
 train_data, test_data, load_workers = utils.load_dataset(opt)
@@ -130,72 +135,69 @@ testing_batch_generator = get_testing_batch()
 
 # --------- plotting funtions ------------------------------------
 def plot_rec(x, epoch):
-      x_c = x[0]
-      x_p = x[random.randint(1, opt.max_step-1)]
+      x_1 = x[0]
+      x_m = x[random.randint(1, opt.max_step-1)]
 
-      h_c = netEC(x_c)
-      h_p = netEP(x_p)
-      rec = netD([h_c, h_p])
+      h_m = netEM([x_1, x_m])
+      rec = netD([x_1, h_m])
 
-      x_c, x_p, rec = x_c.data, x_p.data, rec.data
+      x_1, x_m, rec = x_1.data, x_m.data, rec.data
       fname = '%s/rec/%d.png' % (opt.log_dir, epoch)
       to_plot = []
       row_sz = 5
       nplot = 20
       for i in range(0, nplot-row_sz, row_sz):
-          row = [[xc, xp, xr] for xc, xp, xr in zip(x_c[i:i+row_sz], x_p[i:i+row_sz], rec[i:i+row_sz])]
+          row = [[x1, xm, xr] for x1, xm, xr in zip(x_1[i:i+row_sz], x_m[i:i+row_sz], rec[i:i+row_sz])]
           to_plot.append(list(itertools.chain(*row)))
       utils.save_tensors_image(fname, to_plot)
 
 
-def plot_analogy(x, epoch):
-    x_c = x[0]
+#def plot_analogy(x, epoch):
+#    x_c = x[0]
+#
+#
+#    nrow = 10
+#    row_sz = opt.max_step
+#    to_plot = []
+#    row = [xi[0].data for xi in x]
+#    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
+#    to_plot.append([zeros] + row)
+#    for i in range(nrow):
+#        to_plot.append([x[0][i].data])
+#
+#    for j in range(0, row_sz):
+#        h_m = netEM([x_c, x[j]]).data
+#        for i in range(nrow):
+#            h_m[i] = h_m[0]
+#        rec = netD([x_c, Variable(h_m)])
+#        for i in range(nrow):
+#            to_plot[i+1].append(rec[i].data.clone())
+#
+#    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
+#    utils.save_tensors_image(fname, to_plot)
 
-
-    h_c = netEC(x_c)
-    nrow = 10
-    row_sz = opt.max_step
-    to_plot = []
-    row = [xi[0].data for xi in x]
-    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
-    to_plot.append([zeros] + row)
-    for i in range(nrow):
-        to_plot.append([x[0][i].data])
-
-    for j in range(0, row_sz):
-        h_p = netEP(x[j]).data
-        for i in range(nrow):
-            h_p[i] = h_p[0]
-        rec = netD([h_c, Variable(h_p)])
-        for i in range(nrow):
-            to_plot[i+1].append(rec[i].data.clone())
-
-    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
-    utils.save_tensors_image(fname, to_plot)
-
-def plot_ind(x, epoch):
-    x_c = x[0]
-
-    h_c = netEC(x_c)
-    nrow = 10
-    row_sz = opt.max_step
-    to_plot = []
-    row = [xi[0].data for xi in x]
-    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
-    to_plot.append([zeros] + row)
-    for i in range(nrow):
-        to_plot.append([x[0][i].data])
-
-    for j in range(0, row_sz):
-        h_p = netEP(x[j]).data
-        for i in range(nrow):
-            h_p[i] = h_p[0]
-        rec = netD([h_c, Variable(h_p)])
-        for i in range(nrow):
-            to_plot[i+1].append(rec[i].data.clone())
-
-    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
-    utils.save_tensors_image(fname, to_plot)
+#def plot_ind(x, epoch):
+#    x_c = x[0]
+#
+#    nrow = 10
+#    row_sz = opt.max_step
+#    to_plot = []
+#    row = [xi[0].data for xi in x]
+#    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
+#    to_plot.append([zeros] + row)
+#    for i in range(nrow):
+#        to_plot.append([x[0][i].data])
+#
+#    for j in range(0, row_sz):
+#        h_m = netEM([x_c, x[j]]).data
+#        for i in range(nrow):
+#            h_p[i] = h_p[0]
+#        rec = netD([x_c, Variable(h_p)])
+#        for i in range(nrow):
+#            to_plot[i+1].append(rec[i].data.clone())
+#
+#    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
+#    utils.save_tensors_image(fname, to_plot)
 
 # --------- training funtions ------------------------------------
 def train(x):
@@ -204,10 +206,10 @@ def train(x):
 
     x_1 = x[0]
     x_m1 = x[random.randint(1, opt.max_step-1)]
-    x_m2 = x[random.randint(1, opt.max_step-1)]
+#    x_m2 = x[random.randint(1, opt.max_step-1)]
 
     h_m1 = netEM([x_1, x_m1])
-    h_m2 = netEM([x_1, x_m2])
+#    h_m2 = netEM([x_1, x_m2])
 
     # reconstruction loss: ||D(h_c1, h_p1), x_p1||
     rec = netD([x_1, h_m1])
@@ -229,34 +231,34 @@ def train(x):
 
     return rec_loss.data.cpu().numpy()
 
-def train_scene_discriminator(x):
-    netC.zero_grad()
-
-    #target = torch.cuda.FloatTensor(opt.batch_size, 1)
-    target = torch.FloatTensor(opt.batch_size, 1)
-
-    x1 = x[0]
-    x_m1 = x[random.randint(1, opt.max_step-1)]
-    x_m2 = x[random.randint(1, opt.max_step-1)]
-
-    h_m1 = netEM([x1, x_m1]).detach()
-    h_m2 = netEM([x1, x_m2]).detach()
-
-    half = int(opt.batch_size/2)
-    #rp = torch.randperm(half).cuda()
-    rp = torch.randperm(half)
-    h_m2[:half] = h_m2[rp]
-    target[:half] = 1
-    target[half:] = 0
-
-    out = netC([h_m1, h_m2])
-    bce = bce_criterion(out, Variable(target))
-
-    bce.backward()
-    optimizerC.step()
-
-    acc =out[:half].gt(0.5).sum() + out[half:].le(0.5).sum()
-    return bce.data.cpu().numpy(), acc.data.cpu().numpy()/opt.batch_size
+#def train_scene_discriminator(x):
+#    netC.zero_grad()
+#
+#    #target = torch.cuda.FloatTensor(opt.batch_size, 1)
+#    target = torch.FloatTensor(opt.batch_size, 1)
+#
+#    x1 = x[0]
+#    x_m1 = x[random.randint(1, opt.max_step-1)]
+#    x_m2 = x[random.randint(1, opt.max_step-1)]
+#
+#    h_m1 = netEM([x1, x_m1]).detach()
+#    h_m2 = netEM([x1, x_m2]).detach()
+#
+#    half = int(opt.batch_size/2)
+#    #rp = torch.randperm(half).cuda()
+#    rp = torch.randperm(half)
+#    h_m2[:half] = h_m2[rp]
+#    target[:half] = 1
+#    target[half:] = 0
+#
+#    out = netC([h_m1, h_m2])
+#    bce = bce_criterion(out, Variable(target))
+#
+#    bce.backward()
+#    optimizerC.step()
+#
+#    acc =out[:half].gt(0.5).sum() + out[half:].le(0.5).sum()
+#    return bce.data.cpu().numpy(), acc.data.cpu().numpy()/opt.batch_size
 
 # --------- training loop ------------------------------------
 for epoch in range(opt.niter):
@@ -274,6 +276,7 @@ for epoch in range(opt.niter):
 
         # train main model
         rec_loss = train(x)
+#        print(rec_loss)
         epoch_rec_loss += rec_loss
 
 
@@ -284,9 +287,10 @@ for epoch in range(opt.niter):
     # plot some stuff
     x = next(testing_batch_generator)
     plot_rec(x, epoch)
-    plot_analogy(x, epoch)
+#    plot_analogy(x, epoch)
 
-    print('[%02d] rec loss: %.4f | sim loss: %.4f | scene disc acc: %.3f%% (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch_sim_loss/opt.epoch_size, 100*epoch_sd_acc/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
+    #print('[%02d] rec loss: %.4f | sim loss: %.4f | scene disc acc: %.3f%% (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch_sim_loss/opt.epoch_size, 100*epoch_sd_acc/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
+    print('[%02d] rec loss: %.4f (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
 
     # save the model
     torch.save({
