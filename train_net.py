@@ -29,7 +29,7 @@ parser.add_argument('--channels', default=3, type=int)
 parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
 parser.add_argument('--max_step', type=int, default=12, help='maximum distance between frames')
 parser.add_argument('--sd_weight', type=float, default=0.01, help='weight on adversarial loss')
-parser.add_argument('--model', default='dcgan', help='model type (dcgan | unet | resnet)')
+parser.add_argument('--model', default='conv_mvmt', help='model type (dcgan | unet | resnet)')
 
 
 opt = parser.parse_args()
@@ -55,9 +55,9 @@ dtype = torch.cuda.FloatTensor
 
 
 # ---------------- create the models  ----------------
-if opt.model == 'dcgan':
+if opt.model == 'conv_mvmt':
     if opt.image_width == 64:
-        import models.dcgan_64 as models
+        import models.net_64 as models
     elif opt.image_width == 128:
         raise ValueError('dcgan_128 not implemented yet!')
         import models.dcgan_128 as models
