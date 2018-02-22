@@ -53,8 +53,8 @@ class MovingMNIST(object):
 
             sx = np.random.randint(image_size-digit_size)
             sy = np.random.randint(image_size-digit_size)
-            dx = np.random.randint(-4, 4)
-            dy = np.random.randint(-4, 4)
+            dx = -1 if np.random.randn() > 0 else 1 #np.random.randint(-1, 2)
+            dy = -1 if np.random.randn() > 0 else 1 #np.random.randint(-1, 2)
             for t in range(self.seq_len):
                 if sy < 0:
                     sy = 0
