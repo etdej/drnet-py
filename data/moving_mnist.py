@@ -1,14 +1,13 @@
 import socket
+import os
 import numpy as np
 from torchvision import datasets, transforms
 
-hostname = socket.gethostname()
-if hostname == 'ned':
-    path = '/home/denton/data/mnist/' #/speedy/data/mnist/'
-else:
+if os.getenv('USER') =='denton':
     path = '/misc/vlgscratch4/FergusGroup/denton/data/mnist/'
+else:
+    path = "/home/ecd353/research_project/data/"
 
-path = "/home/ecd353/research_project/data/"
 class MovingMNIST(object):
 
     """Data Handler that creates Bouncing MNIST dataset on the fly."""
@@ -46,7 +45,7 @@ class MovingMNIST(object):
         x = np.zeros((self.seq_len,
                       image_size,
                       image_size,
-                      3),
+                      1),
                     dtype=np.float32)
         for n in range(self.num_digits):
             idx = np.random.randint(self.N)
@@ -71,13 +70,17 @@ class MovingMNIST(object):
                     sx = image_size-32-1
                     dx = -dx
 
-                x[t, sy:sy+32, sx:sx+32, n] = np.copy(digit.numpy())
+                x[t, sy:sy+32, sx:sx+32, 0] += digit.numpy().squeeze()
+                #x[t, sy:sy+32, sx:sx+32, n] = np.copy(digit.numpy())
                 sy += dy
                 sx += dx
         # pick on digit to be in front
+        '''
         front = np.random.randint(self.num_digits)
         for cc in range(self.num_digits):
             if cc != front:
                 x[:, :, :, cc][x[:, :, :, front] > 0] = 0
+        '''
+        x[x>1] = 1.
         return x
 

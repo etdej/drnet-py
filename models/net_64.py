@@ -9,7 +9,7 @@ class dcgan_conv(nn.Module):
     super(dcgan_conv, self).__init__()
     self.main = nn.Sequential(
       nn.Conv2d(nin, nout, 5, stride, 2),
-      #nn.BatchNorm2d(nout),
+      nn.BatchNorm2d(nout),
       nn.LeakyReLU(0.2, inplace=True),
       )
 
@@ -22,7 +22,7 @@ class dcgan_upconv(nn.Module):
     super(dcgan_upconv, self).__init__()
     self.main = nn.Sequential(
       nn.ConvTranspose2d(nin, nout, 4, 2, 1),
-      #nn.BatchNorm2d(nout),
+      nn.BatchNorm2d(nout),
       nn.LeakyReLU(0.2, inplace=True),
       )
 
@@ -65,6 +65,7 @@ class mvmt_encoder(nn.Module):
 class decoder(nn.Module):
     def __init__(self, nb_mvmt_kernel=10,nc=1, nf=64, mvmt_kernel_size=5, batch_size=32):
         super(decoder, self).__init__()
+        self.nc = nc
         self.mvmt_kernel_size= mvmt_kernel_size
         self.batch_size = batch_size
         self.nb_mvmt_kernel = nb_mvmt_kernel
@@ -111,17 +112,23 @@ class decoder(nn.Module):
 
         masks = self.upconv1(concat)
         masks = self.upconv2(masks)
-        masks = self.upconv3(masks)
+        masks = nn.functional.sigmoid(self.upconv3(masks))
 
         mvmt_kernel = mvmt_kernel.view(-1, self.nb_mvmt_kernel, 1, self.mvmt_kernel_size, self.mvmt_kernel_size)
 
         input_frame_view = input_frame.contiguous()
-        input_frame_view = input_frame.view(self.batch_size, 3, 1, 64, 64)
+        input_frame_view = input_frame.view(self.batch_size, self.nc, 1, 64, 64)
 
-        conved_images = Variable(torch.cuda.FloatTensor(self.batch_size, 3, self.nb_mvmt_kernel, 64, 64))
+        conved_images = [ torch.nn.functional.conv2d(input_frame_view[i], mvmt_kernel[i], padding=int((self.mvmt_kernel_size - 1)/2)) for i in range(self.batch_size) ]
+        '''
+        conved_images = Variable(torch.cuda.FloatTensor(self.batch_size, self.nc, self.nb_mvmt_kernel, 64, 64), requires_grad=True)
         # How to do better (depthwise_conv2d in torch)??
         for i in range(self.batch_size):
            conved_images[i] = torch.nn.functional.conv2d(input_frame_view[i], mvmt_kernel[i], padding=int((self.mvmt_kernel_size - 1)/2))
+       '''
+        conved_images = torch.cat(conved_images, 0).view(self.batch_size, self.nc, self.nb_mvmt_kernel, 64, 64)
+        #if conved_images.size()[0] == self.batch_size:
+        #    assert(False)
         transformed_images = torch.cat([input_frame_view, conved_images], 2)
         # Expected Size : (-1, nb_mvmt_kernel + 1, 3, 64, 64)
         output = self.masking_function(transformed_images, masks)
@@ -131,11 +138,13 @@ class decoder(nn.Module):
     def masking_function(self, transformed_images, masks):
         ## LOWER_BOUDING?
         ## normalizing masks accross channels
-        norm = torch.sum(masks, 0)
+        #norm = torch.sum(masks, 0)
+        norm = masks.norm(dim=1).view(self.batch_size, 1, 64, 64).expand(self.batch_size, self.nb_mvmt_kernel+1, 64, 64)
+        
         masks = torch.div(masks, norm)
 
         masks = masks.view(self.batch_size,  1, self.nb_mvmt_kernel + 1,  64, 64)
-        masks = masks.expand(self.batch_size, 3, self.nb_mvmt_kernel + 1, 64, 64)
+        masks = masks.expand(self.batch_size, self.nc, self.nb_mvmt_kernel + 1, 64, 64)
         images = torch.mul(transformed_images, masks)
         return torch.mean(images, 2)
 

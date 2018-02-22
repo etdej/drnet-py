@@ -33,20 +33,16 @@ def load_dataset(opt):
             seq_len=opt.max_step,
             image_size=opt.image_width,
             num_digits=1)
-        load_workers = 5
     elif opt.data == 'suncg':
       train_data = suncg.SUNCG(True, opt.max_step, opt.image_width)
       test_data = suncg.SUNCG(False, opt.max_step, opt.image_width)
-      load_workers = 5
     elif opt.data == 'suncg_dual':
       train_data = suncg.DualSUNCG(opt.max_step, opt.image_width)
       test_data = suncg.DualSUNCG(opt.max_step, opt.image_width)
-      load_workers = 5
     elif opt.data == 'kth':
       train_data = KTH(True, opt.max_step, opt.image_width)
       test_data = KTH(False, opt.max_step, opt.image_width)
-      load_workers = 0
-    return train_data, test_data, load_workers
+    return train_data, test_data
 
 def sequence_input(seq, dtype):
     return [Variable(x.type(dtype)) for x in seq]
@@ -54,10 +50,7 @@ def sequence_input(seq, dtype):
 def normalize_data(opt, dtype, sequence):
     if opt.data == 'moving_mnist':
         sequence.transpose_(0, 1)
-        if opt.channels > 1:
-            sequence.transpose_(3, 4).transpose_(2, 3)
-        else:
-            sequence.unsqueeze_(2)
+        sequence.transpose_(3, 4).transpose_(2, 3)
     elif opt.data == 'suncg' or opt.data == 'suncg_dual' or opt.data == 'kth':
         sequence.transpose_(0, 1)
         sequence.transpose_(3, 4).transpose_(2, 3)

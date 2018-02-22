@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 import utils
 import itertools
 import sys
+import progressbar
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=0.002, type=float, help='learning rate')
@@ -25,11 +26,12 @@ parser.add_argument('--content_dim', type=int, default=64, help='size of the con
 parser.add_argument('--mvmt_dim', type=int, default=10, help='size of the pose vector')
 parser.add_argument('--mvmt_kernel_size', type=int, default=5, help='size of the pose vector')
 parser.add_argument('--image_width', type=int, default=64, help='the height / width of the input image to network')
-parser.add_argument('--channels', default=3, type=int)
+parser.add_argument('--channels', default=1, type=int)
 parser.add_argument('--data', default='moving_mnist', help='dataset to train with')
 parser.add_argument('--max_step', type=int, default=12, help='maximum distance between frames')
 parser.add_argument('--sd_weight', type=float, default=0.01, help='weight on adversarial loss')
 parser.add_argument('--model', default='conv_mvmt', help='model type (dcgan | unet | resnet)')
+parser.add_argument('--data_threads', type=int, default=5, help='number of parallel data loading threads')
 
 
 opt = parser.parse_args()
@@ -40,10 +42,10 @@ opt.log_dir = '%s/%s/%s' % (opt.log_dir, opt.data, name)
 os.makedirs('%s/rec/' % opt.log_dir, exist_ok=True)
 os.makedirs('%s/analogy/' % opt.log_dir, exist_ok=True)
 
-sys.stdout = open('%s/output.txt' % (opt.log_dir), 'w')
+if not os.getenv('USER') =='denton':
+    sys.stdout = open('%s/output.txt' % (opt.log_dir), 'w')
 
 print(opt)
-
 print("Random Seed: ", opt.seed)
 random.seed(opt.seed)
 #torch.manual_seed(opt.seed)
@@ -104,16 +106,16 @@ mse_criterion.cuda()
 bce_criterion.cuda()
 
 # --------- load a dataset ------------------------------------
-train_data, test_data, load_workers = utils.load_dataset(opt)
+train_data, test_data = utils.load_dataset(opt)
 
 train_loader = DataLoader(train_data,
-                          num_workers=load_workers,
+                          num_workers=opt.data_threads,
                           batch_size=opt.batch_size,
                           shuffle=True,
                           drop_last=True,
                           pin_memory=False)
 test_loader = DataLoader(test_data,
-                         num_workers=load_workers,
+                         num_workers=opt.data_threads,
                          batch_size=opt.batch_size,
                          shuffle=True,
                          drop_last=True,
@@ -266,7 +268,9 @@ for epoch in range(opt.niter):
     netD.train()
     netC.train()
     epoch_rec_loss, epoch_sd_loss, epoch_sd_acc =  0, 0, 0
+    progress = progressbar.ProgressBar(max_value=opt.epoch_size).start()
     for i in range(opt.epoch_size):
+        progress.update(i+1)
         x = next(training_batch_generator)
 
         # train scene discriminator
@@ -280,9 +284,11 @@ for epoch in range(opt.niter):
         epoch_rec_loss += rec_loss
 
 
+    progress.finish()
+    utils.clear_progressbar()
     #netEP.eval()
-    #netEC.eval()
-    #netD.eval()
+    netEM.eval()
+    netD.eval()
     #netC.eval()
     # plot some stuff
     x = next(testing_batch_generator)
@@ -293,8 +299,10 @@ for epoch in range(opt.niter):
     print('[%02d] rec loss: %.4f (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
 
     # save the model
+    '''
     torch.save({
         'netD': netD,
         'netEM': netEM,
         'opt': opt},
         '%s/model.pth.tar' % opt.log_dir)
+    '''
