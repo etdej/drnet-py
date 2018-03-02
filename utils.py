@@ -27,12 +27,12 @@ def load_dataset(opt):
             train=True,
             seq_len=opt.max_step,
             image_size=opt.image_width,
-            num_digits=1)
+            num_digits=2)
         test_data = MovingMNIST(
             train=False,
             seq_len=opt.max_step,
             image_size=opt.image_width,
-            num_digits=1)
+            num_digits=2)
     elif opt.data == 'suncg':
       train_data = suncg.SUNCG(True, opt.max_step, opt.image_width)
       test_data = suncg.SUNCG(False, opt.max_step, opt.image_width)

@@ -76,7 +76,7 @@ elif opt.model == 'unet':
     elif opt.image_width == 128:
         raise ValueError('unet_128 not implemented yet!')
 
-netC = models.scene_discriminator(opt.mvmt_dim)
+netC = models.scene_discriminator(opt.mvmt_dim, mvmt_kernel_size=opt.mvmt_kernel_size)
 netEM = models.mvmt_encoder(opt.mvmt_dim, opt.channels, mvmt_kernel_size=opt.mvmt_kernel_size)
 netD = models.decoder(opt.mvmt_dim, opt.channels, batch_size=opt.batch_size, mvmt_kernel_size=opt.mvmt_kernel_size)
 
@@ -154,29 +154,29 @@ def plot_rec(x, epoch):
       utils.save_tensors_image(fname, to_plot)
 
 
-#def plot_analogy(x, epoch):
-#    x_c = x[0]
-#
-#
-#    nrow = 10
-#    row_sz = opt.max_step
-#    to_plot = []
-#    row = [xi[0].data for xi in x]
-#    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
-#    to_plot.append([zeros] + row)
-#    for i in range(nrow):
-#        to_plot.append([x[0][i].data])
-#
-#    for j in range(0, row_sz):
-#        h_m = netEM([x_c, x[j]]).data
-#        for i in range(nrow):
-#            h_m[i] = h_m[0]
-#        rec = netD([x_c, Variable(h_m)])
-#        for i in range(nrow):
-#            to_plot[i+1].append(rec[i].data.clone())
-#
-#    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
-#    utils.save_tensors_image(fname, to_plot)
+def plot_analogy(x, epoch):
+    x_c = x[0]
+
+
+    nrow = 10
+    row_sz = opt.max_step
+    to_plot = []
+    row = [xi[0].data for xi in x]
+    zeros = torch.zeros(opt.channels, opt.image_width, opt.image_width)
+    to_plot.append([zeros] + row)
+    for i in range(nrow):
+        to_plot.append([x[0][i].data])
+
+    for j in range(0, row_sz):
+        h_m = netEM([x_c, x[j]]).data
+        for i in range(nrow):
+            h_m[i] = h_m[0]
+        rec = netD([x_c, Variable(h_m)])
+        for i in range(nrow):
+            to_plot[i+1].append(rec[i].data.clone())
+
+    fname = '%s/analogy/%d.png' % (opt.log_dir, epoch)
+    utils.save_tensors_image(fname, to_plot)
 
 #def plot_ind(x, epoch):
 #    x_c = x[0]
@@ -208,24 +208,24 @@ def train(x):
 
     x_1 = x[0]
     x_m1 = x[random.randint(1, opt.max_step-1)]
-#    x_m2 = x[random.randint(1, opt.max_step-1)]
+    x_m2 = x[random.randint(1, opt.max_step-1)]
 
     h_m1 = netEM([x_1, x_m1])
-#    h_m2 = netEM([x_1, x_m2])
+    h_m2 = netEM([x_1, x_m2])
 
     # reconstruction loss: ||D(h_c1, h_p1), x_p1||
     rec = netD([x_1, h_m1])
     rec_loss = mse_criterion(rec, x_m1)
 
     # scene discriminator loss: maximize entropy of output
-    #target = torch.cuda.FloatTensor(opt.batch_size, 1).fill_(0.5)
+    target = torch.cuda.FloatTensor(opt.batch_size, 1).fill_(0.5)
 #    target = torch.FloatTensor(opt.batch_size, 1).fill_(0.5)
-#    out = netC([h_m1, h_m2])
-#    sd_loss = bce_criterion(out, Variable(target))
+    out = netC([h_m1, h_m2])
+    sd_loss = bce_criterion(out, Variable(target))
 
     # full loss
-    loss = rec_loss
-#    loss = rec_loss + opt.sd_weight*sd_loss
+#    loss = rec_loss
+    loss = rec_loss + opt.sd_weight*sd_loss
     loss.backward()
 
     optimizerEM.step()
@@ -233,34 +233,55 @@ def train(x):
 
     return rec_loss.data.cpu().numpy()
 
-#def train_scene_discriminator(x):
-#    netC.zero_grad()
-#
-#    #target = torch.cuda.FloatTensor(opt.batch_size, 1)
-#    target = torch.FloatTensor(opt.batch_size, 1)
-#
-#    x1 = x[0]
-#    x_m1 = x[random.randint(1, opt.max_step-1)]
-#    x_m2 = x[random.randint(1, opt.max_step-1)]
-#
-#    h_m1 = netEM([x1, x_m1]).detach()
-#    h_m2 = netEM([x1, x_m2]).detach()
-#
-#    half = int(opt.batch_size/2)
-#    #rp = torch.randperm(half).cuda()
-#    rp = torch.randperm(half)
-#    h_m2[:half] = h_m2[rp]
-#    target[:half] = 1
-#    target[half:] = 0
-#
-#    out = netC([h_m1, h_m2])
-#    bce = bce_criterion(out, Variable(target))
-#
-#    bce.backward()
-#    optimizerC.step()
-#
-#    acc =out[:half].gt(0.5).sum() + out[half:].le(0.5).sum()
-#    return bce.data.cpu().numpy(), acc.data.cpu().numpy()/opt.batch_size
+
+def train_fool_discr(x):
+    netEM.zero_grad()
+
+    x_1 = x[0]
+    x_m1 = x[random.randint(1, opt.max_step-1)]
+    x_m2 = x[random.randint(1, opt.max_step-1)]
+
+    h_m1 = netEM([x_1, x_m1])
+    h_m2 = netEM([x_1, x_m2])
+
+    # scene discriminator loss: maximize entropy of output
+    target = torch.cuda.FloatTensor(opt.batch_size, 1).fill_(0.5)
+#    target = torch.FloatTensor(opt.batch_size, 1).fill_(0.5)
+    out = netC([h_m1, h_m2])
+    sd_loss = bce_criterion(out, Variable(target))
+
+    sd_loss.backward()
+
+    optimizerEM.step()
+
+def train_scene_discriminator(x):
+    netC.zero_grad()
+
+    target = torch.cuda.FloatTensor(opt.batch_size, 1)
+    #target = torch.FloatTensor(opt.batch_size, 1)
+
+    x1 = x[0]
+    x_m1 = x[random.randint(1, opt.max_step-1)]
+    x_m2 = x[random.randint(1, opt.max_step-1)]
+
+    h_m1 = netEM([x1, x_m1]).detach()
+    h_m2 = netEM([x1, x_m2]).detach()
+
+    half = int(opt.batch_size/2)
+    rp = torch.randperm(half).cuda()
+    #rp = torch.randperm(half)
+    h_m2[:half] = h_m2[rp]
+    target[:half] = 1
+    target[half:] = 0
+
+    out = netC([h_m1, h_m2])
+    bce = bce_criterion(out, Variable(target))
+
+    bce.backward()
+    optimizerC.step()
+
+    acc =out[:half].gt(0.5).sum() + out[half:].le(0.5).sum()
+    return bce.data.cpu().numpy(), acc.data.cpu().numpy()/opt.batch_size
 
 # --------- training loop ------------------------------------
 for epoch in range(opt.niter):
@@ -274,9 +295,12 @@ for epoch in range(opt.niter):
         x = next(training_batch_generator)
 
         # train scene discriminator
-#        sd_loss, sd_acc = train_scene_discriminator(x)
-#        epoch_sd_loss += sd_loss
-#        epoch_sd_acc += sd_acc
+        sd_loss, sd_acc = train_scene_discriminator(x)
+        epoch_sd_loss += sd_loss
+        epoch_sd_acc += sd_acc
+	
+	# train fool disc
+        #train_fool_discr(x)
 
         # train main model
         rec_loss = train(x)
@@ -286,17 +310,18 @@ for epoch in range(opt.niter):
 
     progress.finish()
     utils.clear_progressbar()
-    #netEP.eval()
+    
     netEM.eval()
     netD.eval()
     #netC.eval()
+    
     # plot some stuff
     x = next(testing_batch_generator)
     plot_rec(x, epoch)
-#    plot_analogy(x, epoch)
+    plot_analogy(x, epoch)
 
-    #print('[%02d] rec loss: %.4f | sim loss: %.4f | scene disc acc: %.3f%% (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch_sim_loss/opt.epoch_size, 100*epoch_sd_acc/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
-    print('[%02d] rec loss: %.4f (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
+    print('[%02d] rec loss: %.4f | scene disc acc: %.3f%% (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, 100*epoch_sd_acc/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
+    #print('[%02d] rec loss: %.4f (%d)' % (epoch, epoch_rec_loss/opt.epoch_size, epoch*opt.epoch_size*opt.batch_size))
 
     # save the model
     '''
