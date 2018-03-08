@@ -76,7 +76,8 @@ elif opt.model == 'unet':
     elif opt.image_width == 128:
         raise ValueError('unet_128 not implemented yet!')
 
-netC = models.scene_discriminator(opt.mvmt_dim, mvmt_kernel_size=opt.mvmt_kernel_size)
+#netC = models.scene_discriminator(opt.mvmt_dim, mvmt_kernel_size=opt.mvmt_kernel_size)
+netC = models.scene_conv_discriminator(opt.mvmt_dim, mvmt_kernel_size=opt.mvmt_kernel_size)
 netEM = models.mvmt_encoder(opt.mvmt_dim, opt.channels, mvmt_kernel_size=opt.mvmt_kernel_size)
 netD = models.decoder(opt.mvmt_dim, opt.channels, batch_size=opt.batch_size, mvmt_kernel_size=opt.mvmt_kernel_size)
 

@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 from torch.autograd import Variable
 
 dtype = torch.cuda.FloatTensor
@@ -164,4 +165,20 @@ class scene_discriminator(nn.Module):
     def forward(self, input):
         output = self.main(torch.cat(input, 1).view(-1, self.kernel_dim*2))
         return output
+
+class scene_conv_discriminator(nn.Module):
+    def __init__(self, nb_mvmt_kernel=10, mvmt_kernel_size=5, nf=32):
+        super(scene_conv_discriminator, self).__init__()
+        self.linear_input_dim = 2*nf*math.ceil(mvmt_kernel_size/4)**2
+        self.conv1 = dcgan_conv(2*nb_mvmt_kernel, nf, 2)
+        self.conv2 = dcgan_conv(nf, 2*nf, 2)
+        self.linear = nn.Linear(self.linear_input_dim, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input):
+        output = self.conv1(torch.cat(input, 1))
+        output = self.conv2(output)
+        output = output.view(-1, self.linear_input_dim)
+        output = self.linear(output)
+        return self.sigmoid(output)
 
